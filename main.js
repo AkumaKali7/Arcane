@@ -1116,7 +1116,7 @@ function update(ts) {
 
     if (gameState === 'dead') { drawDead(); requestAnimationFrame(update); return }
     if (gameState === 'crafting') { requestAnimationFrame(update); return }
-    if (gameState === 'menu') { requestAnimationFrame(update); return }
+    if (gameState === 'menu') { drawMenu(); requestAnimationFrame(update); return }
 
     pool.mana = Math.min(pool.maxMana, pool.mana + pool.regenRate * dt)
 
@@ -1293,6 +1293,43 @@ function drawDead() {
 }
 
 // ─────────────────────────────────────────────────────
+//  MENU SCREEN
+// ─────────────────────────────────────────────────────
+function drawMenu() {
+    const W_ = W(), H_ = H()
+    
+    // Background gradient
+    const grad = ctx2d.createLinearGradient(0, 0, 0, H_)
+    grad.addColorStop(0, '#0a0a12')
+    grad.addColorStop(1, '#1a1a2e')
+    ctx2d.fillStyle = grad
+    ctx2d.fillRect(0, 0, W_, H_)
+    
+    // Title
+    ctx2d.textAlign = 'center'
+    ctx2d.font = 'bold 48px monospace'
+    ctx2d.fillStyle = '#9b7aff'
+    ctx2d.fillText('ARCANE SPELLFORGE', W_ / 2, H_ / 2 - 80)
+    
+    // Subtitle
+    ctx2d.font = '16px monospace'
+    ctx2d.fillStyle = '#6a5a8a'
+    ctx2d.fillText('Craft spells • Survive waves • Master mana', W_ / 2, H_ / 2 - 50)
+    
+    // Start button hint
+    ctx2d.font = 'bold 20px monospace'
+    ctx2d.fillStyle = '#c8c0e0'
+    ctx2d.fillText('CLICK or PRESS ENTER TO START', W_ / 2, H_ / 2 + 20)
+    
+    // Controls hint
+    ctx2d.font = '12px monospace'
+    ctx2d.fillStyle = '#4a4465'
+    ctx2d.fillText('WASD/Arrows to move • Edit scrolls between waves', W_ / 2, H_ / 2 + 60)
+    
+    ctx2d.textAlign = 'left'
+}
+
+// ─────────────────────────────────────────────────────
 //  HUD
 // ─────────────────────────────────────────────────────
 function buildScrollBar() {
@@ -1329,6 +1366,10 @@ function showMsg(txt) {
 window.addEventListener('keydown', e => {
     keys[e.key.toLowerCase()] = true
     if (gameState === 'crafting') return
+    if (gameState === 'menu' && (e.key === 'Enter' || e.key === ' ')) {
+        startGame()
+        return
+    }
     if (['1', '2', '3', '4'].includes(e.key)) {
         const i = parseInt(e.key) - 1
         if (scrollSrc[i] !== null) { selectedScroll = i; buildScrollBar() }
@@ -1341,6 +1382,10 @@ canvas.addEventListener('mousemove', e => {
     const r = canvas.getBoundingClientRect(); mouse.x = e.clientX - r.left; mouse.y = e.clientY - r.top
 })
 canvas.addEventListener('click', e => { //CAST SPELLS
+    if (gameState === 'menu') {
+        startGame()
+        return
+    }
     if (gameState !== 'play') return
     const r = canvas.getBoundingClientRect()
     castSpell(e.clientX - r.left, e.clientY - r.top)
@@ -1356,6 +1401,13 @@ canvas.addEventListener('wheel', e => {
 // ─────────────────────────────────────────────────────
 //  BOOT
 // ─────────────────────────────────────────────────────
+function startGame() {
+    gameState = 'play'
+    player.x = W() / 2; player.y = H() / 2
+    buildScrollBar()
+    startWave(1)
+}
+
 function resetGame() {
     player.hp = player.maxHp = 100; player.invincible = 0
     pool.mana = pool.maxMana = 500; pool.regenRate = 20; pool.costMult = 1; pool.manaOnKill = 0
@@ -1367,13 +1419,10 @@ function resetGame() {
     particles = [];
 
     score = 0; waveNum = 0; chosenUpgradeIds = []
-    gameState = 'play'
-    player.x = W() / 2; player.y = H() / 2
-    buildScrollBar()
-    startWave(1)
+    startGame()
 }
 
 
 
-resetGame()
+gameState = 'menu'
 requestAnimationFrame(ts => { lastTime = ts; update(ts) })
