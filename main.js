@@ -4,51 +4,55 @@
 // The interpreter runs the spell script; the engine enforces the rules.
 // Scripts express intent — the engine handles consequences.
 
-// ─── Cost Tables ─────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════
+//  SPELL ENGINE - MANA ECONOMY AND SPELL LIFECYCLE
+// ═══════════════════════════════════════════════════════
 
-const SPELL_COSTS = {
-    shape: {
+/**
+ * Mana cost configuration for spell components
+ */
+const SPELL_COSTS = Object.freeze({
+    shape: Object.freeze({
         ball: 10,
         cone: 15,
         beam: 12,
         nova: 20,
         wall: 18,
-    },
-    attribute: {
+    }),
+    attribute: Object.freeze({
         fire: 10,
         light: 8,
         ice: 9,
         shadow: 12,
         arcane: 7,
         void: 15,
-    },
-    // mana drained per second per unit of speed
-    // follow spells use half (no kinetic energy cost)
-    speed_per_unit: 2,
-    speed_follow_mult: 0.5,
-    // size upfront cost per size unit above 1
-    size_per_unit: 3,
-    // sub-spell nesting surcharge per nesting level
-    nest_surcharge: 0.10,
-}
+    }),
+    speedPerUnit: 2,           // mana drained per second per unit of speed
+    speedFollowMult: 0.5,      // follow spells use half (no kinetic energy cost)
+    sizePerUnit: 3,            // upfront cost per size unit above 1
+    nestSurcharge: 0.10,       // sub-spell nesting surcharge per level
+})
 
-// ─── Spell Engine ─────────────────────────────────────────────────────────────
-
+/**
+ * SpellEngine - Manages the mana economy and lifecycle for a running spell.
+ * The interpreter runs the spell script; the engine enforces the rules.
+ * Scripts express intent — the engine handles consequences.
+ */
 class SpellEngine {
     constructor({ outputFn, onStateChange, poolMana = 500, envMana = Infinity, nestDepth = 0, poolRef }) {
         this.outputFn = outputFn       // (type, msg) => void
         this.onStateChange = onStateChange  // () => void  — UI refresh hook
         this.nestDepth = nestDepth      // sub-spell nesting level
 
-
         // ── Mana sources ──
         this.pool = poolRef ? poolRef : new Pool(poolMana)   // player's personal mana pool (shared resource)
         this.envMana = envMana    // environment mana (unlimited but slow)
+        
         // ── Spell state ──
         this.mana = 0          // current mana budget for this spell
-        this.reserved = 0          // locked mana (for explosions, sub-payloads)
-        this.upfront = 0          // total upfront cost spent
-        this.drainRate = 0          // mana/sec ongoing drain
+        this.reserved = 0      // locked mana (for explosions, sub-payloads)
+        this.upfront = 0       // total upfront cost spent
+        this.drainRate = 0     // mana/sec ongoing drain
 
         // ── Properties ──
         this.spellShape = null
@@ -62,6 +66,7 @@ class SpellEngine {
         this.elapsed = 0
         this.gatherDuration = 0     // how long gathering takes (0 = instant)
         this.gatherElapsed = 0
+        this.progress = 0
 
         // ── Hooks (registered by script) ──
         this.hooks = {
@@ -80,8 +85,9 @@ class SpellEngine {
         this._scrolls = {}
     }
 
-    // ── Script-facing API (injected into interpreter context) ─────────────────
-
+    /**
+     * Returns the current spell state for script access
+     */
     start() {
         return {
             gatherAmount: this.gatherAmount,
@@ -97,15 +103,18 @@ class SpellEngine {
         }
     }
 
-    // gather(source, amount)
-    // source: "pool" | "env"
-    // engine decides speed; player can't override timing
+    /**
+     * Gather mana from a source (pool or environment)
+     * @param {string} source - 'pool' | 'env'
+     * @param {number} amount - Amount of mana to gather
+     * @returns {boolean} Success status
+     */
     gather(source, amount) {
-
         const surcharge = this._nestSurcharge()
         const actual = Math.ceil(amount * surcharge)
         this.gatherAmount = amount
         this.gatherSource = source
+        
         if (source === 'pool') {
             if (this.pool.mana < actual) {
                 this._err(`not enough pool mana — need ${actual}, have ${Math.round(this.pool.mana)}`)
@@ -114,7 +123,6 @@ class SpellEngine {
             }
             this.pool.mana -= actual
             this.mana = actual
-            //this._log('engine', `gathered <b>${actual}</b> from pool${surcharge > 1 ? ` (+${Math.round((surcharge - 1) * 100)}% nest surcharge)` : ''}`)
             this.active = true
             return true
 
@@ -123,7 +131,6 @@ class SpellEngine {
             this.gatherDuration = Math.max(1, actual / 200)
             this.mana = actual
             this.phase = 'gathering'
-            //this._log('engine', `gathering <b>${actual}</b> from environment (~${this.gatherDuration.toFixed(1)}s)${surcharge > 1 ? ` (+${Math.round((surcharge - 1) * 100)}% nest surcharge)` : ''}`)
             return true
 
         } else {
@@ -131,11 +138,16 @@ class SpellEngine {
         }
     }
 
-    // shape("ball" | "cone" | "beam", size=1)
+    /**
+     * Set the spell shape and optional size
+     * @param {string} form - Shape type (ball, cone, beam, nova, wall)
+     * @param {number} size - Size multiplier (default: 1)
+     * @returns {boolean} Success status
+     */
     shape(form, size = 1) {
         if (!this._requireActive('shape()')) return false
-        const cost = (SPELL_COSTS.shape[form] ?? 10)
-            + (size > 1 ? SPELL_COSTS.size_per_unit * (size - 1) : 0)
+        const cost = (SPELL_COSTS.shape[form] ?? 10) +
+                     (size > 1 ? SPELL_COSTS.sizePerUnit * (size - 1) : 0)
 
         if (!this._spend(cost, `shape("${form}"${size > 1 ? ', size=' + size : ''})`)) return false
         this.spellShape = form
@@ -143,7 +155,11 @@ class SpellEngine {
         return true
     }
 
-    // attribute("fire" | "light" | ...)
+    /**
+     * Add an attribute to the spell
+     * @param {string} attr - Attribute type (fire, light, ice, shadow, arcane, void)
+     * @returns {boolean} Success status
+     */
     attribute(attr) {
         if (!this._requireActive('attribute()')) return false
         const cost = SPELL_COSTS.attribute[attr] ?? 8
@@ -152,53 +168,58 @@ class SpellEngine {
         return true
     }
 
-    // speed(units) — sets ongoing drain
+    /**
+     * Set spell speed (affects ongoing mana drain)
+     * @param {number} units - Speed units
+     * @returns {boolean} Success status
+     */
     speed(units) {
         if (!this._requireActive('speed()')) return false
-        const mult = this.following ? SPELL_COSTS.speed_follow_mult : 1
-        const drain = units * SPELL_COSTS.speed_per_unit * mult
+        const mult = this.following ? SPELL_COSTS.speedFollowMult : 1
+        const drain = units * SPELL_COSTS.speedPerUnit * mult
         this.spellSpeed = units
         this.drainRate += drain
-        //this._log('mana', `speed(<b>${units}</b>) → <em>-${drain.toFixed(1)}</em> mana/sec ongoing drain`)
         return true
     }
 
-    // follow(target) — spell tracks caster/target instead of flying straight
+    /**
+     * Make spell follow a target instead of flying straight
+     * @param {string} target - Target to follow
+     * @returns {boolean} Success status
+     */
     follow(target) {
-        if (target == 'caster') {
-
-            //this._log('engine', `spell set to follow <b>${target}</b>`)
-        }
         this.following = true
         return true
     }
 
-    // reserve(amount) — lock mana for a triggered payload
+    /**
+     * Reserve mana for a triggered payload (e.g., explosion)
+     * @param {number} amount - Amount to reserve
+     * @returns {boolean} Success status
+     */
     reserve(amount) {
         const free = this.mana - this.reserved
         if (amount > free) {
             return this._err(`cannot reserve ${amount} — only ${Math.round(free)} free mana`)
         }
         this.reserved += amount
-        //this._log('mana', `reserve(<b>${amount}</b>) → <em>${amount}</em> mana locked`)
         return true
     }
 
-    // cast(scrollName) — spawn a sub-spell using this spell's mana as its pool
-    // surcharge is engine-enforced; player cannot change it
+    /**
+     * Cast a sub-spell from a scroll using this spell's mana as its pool
+     * Surcharge is engine-enforced; player cannot change it
+     * @param {string} scrollName - Name of scroll to cast
+     * @returns {boolean} Success status
+     */
     cast(scrollName) {
-
         if (!this._requireActive('cast()')) return false
         
         const src = scrollSrc[0]
-        
         if (!src) return this._err(`scroll "${scrollName}" not found in inventory`)
         
         const tokens = lex(src)
-        
         const ast = new Parser(tokens).parse()
-
-        const surcharge = Math.round(SPELL_COSTS.nest_surcharge * 100)
         
         // Run the sub-spell with this spell's remaining free mana as its pool
         const freePool = this.mana - this.reserved
@@ -215,21 +236,14 @@ class SpellEngine {
         try {
             if (!runScroll(ast, subEngine)) return
             
-            // Deduct what the sub-spell consumed from parent's free mana
-            const consumed = freePool - subEngine.poolMana - subEngine.mana
-            
-            // (poolMana of sub = what was left after gather; mana = what's in sub now)
-            
-            // Simplification: track upfront costs spent in sub
+            // Simplification: track upfront costs spent in sub-spell
             const subCost = subEngine.upfront
             if (subCost > 0) {
                 this.mana = Math.max(this.reserved, this.mana - subCost)
                 this._log('mana', `sub-spell <b>${scrollName}</b> cost <em>${subCost}</em> mana from parent`)
-
             }
 
             const proj = SpawnProj(this.projectile, this.target ? this.target : player, subEngine)
-            
             subEngine.projectile = proj
             projectiles.push(proj)
         } catch (e) {
@@ -238,59 +252,75 @@ class SpellEngine {
         return true
     }
 
-    // explode() — release reserved mana as AoE damage
+    /**
+     * Release reserved mana as AoE damage
+     * @returns {boolean} Success status
+     */
     explode() {
         if (this.reserved <= 0) {
-            //this._log('warn', 'explode() called but no mana reserved')
             return false
         }
         const power = this.reserved
         this.mana -= this.reserved
         this.reserved = 0
-        //this._log('engine', `<b>explosion</b> — released <em>${power}</em> reserved mana as damage`)
         this._kill()
         return true
     }
 
-    // ── Hook registration (called from script) ─────────────────────────────
-
+    /**
+     * Register a hook for spell events
+     * @param {string} name - Hook name (on_hit, on_deplete, on_check, on_low_mana)
+     * @param {object} config - Hook configuration
+     * @param {function} fn - Callback function
+     */
     registerHook(name, config, fn) {
         if (name === 'on_hit') { this.hooks.on_hit = fn; return }
         if (name === 'on_deplete') { this.hooks.on_deplete = fn; return }
-        if (name === 'on_check') { this.hooks.on_check = { every: config.every ?? 2, fn }; return }
-        if (name === 'on_low_mana') { this.hooks.on_low_mana = { threshold: config.threshold ?? 100, fn }; return }
+        if (name === 'on_check') { 
+            this.hooks.on_check = { every: config.every ?? 2, fn }
+            return 
+        }
+        if (name === 'on_low_mana') { 
+            this.hooks.on_low_mana = { threshold: config.threshold ?? 100, fn }
+            return 
+        }
         this._err(`unknown hook: "${name}"`)
     }
 
-    // ── Detects Enemy nearby target (Player or Caster)
-    enemy_nearby(target){
-        target = target != undefined ? target : this.projectile
-        let r = false
+    /**
+     * Detect enemies near target (player or caster)
+     * @param {*} target - Target to check around
+     * @returns {boolean} True if enemy found
+     */
+    enemy_nearby(target) {
+        target = target !== undefined ? target : this.projectile
+        let found = false
         enemies.some(e => {
-        const dx = e.x - target.x, dy = e.y - target.y
-        if (Math.sqrt(dx * dx + dy * dy) < 180){
-            this.target = e
-            return r = true
-
-        }
-        return false
-    })
-    return r
+            const dx = e.x - target.x
+            const dy = e.y - target.y
+            if (Math.sqrt(dx * dx + dy * dy) < 180) {
+                this.target = e
+                found = true
+            }
+            return found
+        })
+        return found
     }
-    // ── Simulation tick (called by sandbox every 100ms) ───────────────────
 
+    /**
+     * Simulation tick (called by sandbox every 100ms)
+     * @param {number} dt - Delta time in seconds
+     */
     tick(dt) {
         if (this.phase === 'dead') return
 
-        // gathering phase
+        // Gathering phase
         if (this.phase === 'gathering') {
             this.gatherElapsed += dt
             if (this.gatherElapsed >= this.gatherDuration) {
                 this.phase = 'active'
                 this.projectile.x = player.x
                 this.projectile.y = player.y
-
-                //this._log('engine', `gather complete — spell now active`)
                 this._notifyChange()
             } else {
                 this.progress = Math.round((this.gatherElapsed / this.gatherDuration) * 100) + 2
@@ -303,7 +333,7 @@ class SpellEngine {
 
         this.elapsed += dt
 
-        // ongoing drain
+        // Ongoing drain
         if (this.drainRate > 0) {
             const free = this.mana - this.reserved
             if (free > 0) {
@@ -312,32 +342,38 @@ class SpellEngine {
             }
         }
 
-        // on_check
+        // on_check hook
         if (this.hooks.on_check) {
             this._checkAccum += dt
             if (this._checkAccum >= this.hooks.on_check.every) {
                 this._checkAccum = 0
-                //this._log('hook', `on_check fired (every ${this.hooks.on_check.every}s)`)
-                try { this.hooks.on_check.fn() } catch (e) { console.log(e);this._err(e.message) }
+                try { 
+                    this.hooks.on_check.fn() 
+                } catch (e) { 
+                    console.log(e)
+                    this._err(e.message) 
+                }
             }
         }
 
-        // on_low_mana
+        // on_low_mana hook
         if (this.hooks.on_low_mana && !this._lowManaPulsed) {
             if (this.mana < this.hooks.on_low_mana.threshold && this._lowManaCooldown <= 0) {
-                //this._log('hook', `on_low_mana fired (mana ${Math.round(this.mana)} < ${this.hooks.on_low_mana.threshold})`)
                 this._lowManaPulsed = true
                 this._lowManaCooldown = 3
-                try { this.hooks.on_low_mana.fn() } catch (e) { this._err(e.message) }
+                try { 
+                    this.hooks.on_low_mana.fn() 
+                } catch (e) { 
+                    this._err(e.message) 
+                }
                 setTimeout(() => { this._lowManaPulsed = false }, 3000)
             }
         }
         if (this._lowManaCooldown > 0) this._lowManaCooldown -= dt
 
-        // deplete check
+        // Deplete check
         const free = this.mana - this.reserved
         if (this.drainRate > 0 && free <= 0.1) {
-            //this._log('hook', 'on_deplete fired — free mana exhausted')
             if (this.hooks.on_deplete) {
                 try { this.hooks.on_deplete() } catch (e) { this._err(e.message) }
             }
@@ -347,19 +383,24 @@ class SpellEngine {
         this._notifyChange()
     }
 
-    // ── External trigger (e.g. enemy hit) ────────────────────────────────
-
+    /**
+     * Trigger hit event (called when projectile hits target)
+     */
     triggerHit() {
-        //this._log('hook', 'on_hit fired')
         if (this.hooks.on_hit) {
-
             try { this.hooks.on_hit() } catch (e) { this._err(e.message) }
         }
         if (this.phase !== 'dead') this._kill()
     }
 
-    // ── Helpers ──────────────────────────────────────────────────────────
+    // ═══════════════════════════════════════════════════════
+    //  PRIVATE HELPERS
+    // ═══════════════════════════════════════════════════════
 
+    /**
+     * Spend mana from the budget
+     * @private
+     */
     _spend(cost, label) {
         const free = this.mana - this.reserved
         if (cost > free) {
@@ -367,45 +408,63 @@ class SpellEngine {
         }
         this.mana -= cost
         this.upfront += cost
-        //this._log('mana', `${label} → <em>-${cost}</em> mana (now <em>${Math.round(this.mana)}</em>)`)
         return true
     }
 
+    /**
+     * Check if spell is active (currently always returns true)
+     * @private
+     */
     _requireActive(name) {
         return true
-        if (!this.active) {
-            this._err(`${name} requires an active spell — call gather() first`)
-            return false
-        }
-        return true
     }
 
+    /**
+     * Calculate nesting surcharge multiplier
+     * @private
+     */
     _nestSurcharge() {
-        return 1 + SPELL_COSTS.nest_surcharge * this.nestDepth
+        return 1 + SPELL_COSTS.nestSurcharge * this.nestDepth
     }
 
+    /**
+     * End the spell lifecycle
+     * @private
+     */
     _kill() {
         this.phase = 'dead'
-        //this._log('engine', `spell expired (elapsed: ${this.elapsed.toFixed(1)}s)`)
         this._notifyChange()
     }
 
+    /**
+     * Log a message (internal use)
+     * @private
+     */
     _log(type, msg) {
-        // type: 'engine' | 'mana' | 'hook' | 'warn' | 'err' | 'spell'
         this.outputFn(type, msg)
     }
 
+    /**
+     * Show an error message
+     * @private
+     */
     _err(msg) {
         showMsg(msg)
         return false
     }
 
+    /**
+     * Notify UI of state change
+     * @private
+     */
     _notifyChange() {
         if (this.onStateChange) this.onStateChange()
     }
 
-    // ── Snapshot for UI rendering ─────────────────────────────────────────
-
+    /**
+     * Get snapshot for UI rendering
+     * @returns {object} Current spell state
+     */
     snapshot() {
         const total = this.mana + this.upfront
         const free = Math.max(0, this.mana - this.reserved)
@@ -1057,7 +1116,7 @@ function update(ts) {
 
     if (gameState === 'dead') { drawDead(); requestAnimationFrame(update); return }
     if (gameState === 'crafting') { requestAnimationFrame(update); return }
-    if (gameState === 'menu') { requestAnimationFrame(update); return }
+    if (gameState === 'menu') { drawMenu(); requestAnimationFrame(update); return }
 
     pool.mana = Math.min(pool.maxMana, pool.mana + pool.regenRate * dt)
 
@@ -1234,6 +1293,43 @@ function drawDead() {
 }
 
 // ─────────────────────────────────────────────────────
+//  MENU SCREEN
+// ─────────────────────────────────────────────────────
+function drawMenu() {
+    const W_ = W(), H_ = H()
+    
+    // Background gradient
+    const grad = ctx2d.createLinearGradient(0, 0, 0, H_)
+    grad.addColorStop(0, '#0a0a12')
+    grad.addColorStop(1, '#1a1a2e')
+    ctx2d.fillStyle = grad
+    ctx2d.fillRect(0, 0, W_, H_)
+    
+    // Title
+    ctx2d.textAlign = 'center'
+    ctx2d.font = 'bold 48px monospace'
+    ctx2d.fillStyle = '#9b7aff'
+    ctx2d.fillText('ARCANE SPELLFORGE', W_ / 2, H_ / 2 - 80)
+    
+    // Subtitle
+    ctx2d.font = '16px monospace'
+    ctx2d.fillStyle = '#6a5a8a'
+    ctx2d.fillText('Craft spells • Survive waves • Master mana', W_ / 2, H_ / 2 - 50)
+    
+    // Start button hint
+    ctx2d.font = 'bold 20px monospace'
+    ctx2d.fillStyle = '#c8c0e0'
+    ctx2d.fillText('CLICK or PRESS ENTER TO START', W_ / 2, H_ / 2 + 20)
+    
+    // Controls hint
+    ctx2d.font = '12px monospace'
+    ctx2d.fillStyle = '#4a4465'
+    ctx2d.fillText('WASD/Arrows to move • Edit scrolls between waves', W_ / 2, H_ / 2 + 60)
+    
+    ctx2d.textAlign = 'left'
+}
+
+// ─────────────────────────────────────────────────────
 //  HUD
 // ─────────────────────────────────────────────────────
 function buildScrollBar() {
@@ -1270,6 +1366,10 @@ function showMsg(txt) {
 window.addEventListener('keydown', e => {
     keys[e.key.toLowerCase()] = true
     if (gameState === 'crafting') return
+    if (gameState === 'menu' && (e.key === 'Enter' || e.key === ' ')) {
+        startGame()
+        return
+    }
     if (['1', '2', '3', '4'].includes(e.key)) {
         const i = parseInt(e.key) - 1
         if (scrollSrc[i] !== null) { selectedScroll = i; buildScrollBar() }
@@ -1282,6 +1382,10 @@ canvas.addEventListener('mousemove', e => {
     const r = canvas.getBoundingClientRect(); mouse.x = e.clientX - r.left; mouse.y = e.clientY - r.top
 })
 canvas.addEventListener('click', e => { //CAST SPELLS
+    if (gameState === 'menu') {
+        startGame()
+        return
+    }
     if (gameState !== 'play') return
     const r = canvas.getBoundingClientRect()
     castSpell(e.clientX - r.left, e.clientY - r.top)
@@ -1297,6 +1401,13 @@ canvas.addEventListener('wheel', e => {
 // ─────────────────────────────────────────────────────
 //  BOOT
 // ─────────────────────────────────────────────────────
+function startGame() {
+    gameState = 'play'
+    player.x = W() / 2; player.y = H() / 2
+    buildScrollBar()
+    startWave(1)
+}
+
 function resetGame() {
     player.hp = player.maxHp = 100; player.invincible = 0
     pool.mana = pool.maxMana = 500; pool.regenRate = 20; pool.costMult = 1; pool.manaOnKill = 0
@@ -1308,13 +1419,10 @@ function resetGame() {
     particles = [];
 
     score = 0; waveNum = 0; chosenUpgradeIds = []
-    gameState = 'play'
-    player.x = W() / 2; player.y = H() / 2
-    buildScrollBar()
-    startWave(1)
+    startGame()
 }
 
 
 
-resetGame()
+gameState = 'menu'
 requestAnimationFrame(ts => { lastTime = ts; update(ts) })
