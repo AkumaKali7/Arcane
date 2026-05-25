@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Arcane</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="ui-wrap">
+  <canvas id="c"></canvas>
+  <div id="hud">
+    <div id="mana-wrap">
+      <span id="mana-label">MANA</span>
+      <div id="mana-track"><div id="mana-fill" style="width:100%"></div></div>
+      <span id="mana-val">500 / 500</span>
+    </div>
+    <div id="scroll-bar"></div>
+  </div>
+</div>
+<div id="msg"></div>
+<div id="craft-screen">
+  <div id="craft-title">ARCANE — GRIMOIRE</div>
+  <div id="craft-subtitle"></div>
+  <div id="craft-main">
+    <div id="scroll-tabs"></div>
+    <div id="editor-wrap-craft">
+      <div id="editor-area">
+        <div id="craft-line-nums"></div>
+        <textarea id="craft-editor" spellcheck="false" autocomplete="off"></textarea>
+      </div>
+      <div id="craft-error"></div>
+      <div id="api-ref">
+        <div><span>gather(</span>pool|env, N<span>)</span></div>
+        <div><span>shape(</span>"ball"|"beam"|"nova"<span>)</span></div>
+        <div><span>attribute(</span>"fire"|"ice"|"shadow"|"arcane"<span>)</span></div>
+        <div><span>speed(</span>N<span>)</span> · <span>follow()</span></div>
+        <div><span>reserve(</span>N<span>)</span> · <span>explode()</span></div>
+        <div><span>on_hit(fn()...end)</span></div>
+        <div><span>on_deplete(fn()...end)</span></div>
+        <div><span>on_check({every:N},fn()...end)</span></div>
+        <div><span>mana_pool()</span> · <span>self_mana()</span></div>
+        <div><span>enemy_nearby()</span></div>
+      </div>
+    </div>
+  </div>
+  <div id="upgrade-section">
+    <div id="upgrade-title">▸ CHOOSE AN UPGRADE</div>
+    <div id="upgrade-cards"></div>
+  </div>
+  <div id="craft-footer">
+    <button class="btn-craft" id="btn-reset-scroll">Reset scroll</button>
+    <button class="btn-craft primary" id="btn-next-wave" disabled>Next wave ►</button>
+  </div>
+</div>
+<script src="parser.js"></script>
+<script src="main.js"></script>
+</body>
+</html>

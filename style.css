@@ -1,0 +1,391 @@
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0
+}
+
+body {
+    background: #0a0a0f;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+    font-family: 'Courier New', monospace;
+    overflow: hidden;
+    user-select: none
+}
+
+#ui-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px
+}
+
+canvas {
+    display: block;
+    border: 1px solid #2a2a4a;
+    box-shadow: 0 0 40px rgba(100, 60, 180, 0.3);
+    cursor: crosshair
+}
+
+#hud {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 0 4px
+}
+
+#mana-wrap {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1
+}
+
+#mana-label {
+    color: #4fc3f7;
+    font-size: 11px;
+    letter-spacing: .08em;
+    min-width: 36px
+}
+
+#mana-track {
+    flex: 1;
+    height: 6px;
+    background: #1a2a3a;
+    border-radius: 3px;
+    overflow: hidden
+}
+
+#mana-fill {
+    height: 100%;
+    background: #4fc3f7;
+    box-shadow: 0 0 8px #4fc3f7;
+    border-radius: 3px;
+    transition: width .1s
+}
+
+#mana-val {
+    color: #4fc3f7aa;
+    font-size: 10px;
+    min-width: 60px;
+    text-align: right
+}
+
+#scroll-bar {
+    display: flex;
+    gap: 6px
+}
+
+.scroll-slot {
+    width: 60px;
+    height: 40px;
+    border: 1px solid #2a2a4a;
+    background: #0f0f1a;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all .1s;
+    position: relative
+}
+
+.scroll-slot:hover {
+    border-color: #7b5ea7
+}
+
+.scroll-slot.active {
+    border-color: #a87fd4;
+    background: #1a1030;
+    box-shadow: 0 0 10px rgba(168, 127, 212, 0.4)
+}
+
+.scroll-slot.empty {
+    opacity: .4;
+    border-style: dashed;
+    cursor: default
+}
+
+.scroll-slot .skey {
+    font-size: 9px;
+    color: #5a5475;
+    position: absolute;
+    top: 2px;
+    left: 4px
+}
+
+.scroll-slot .sname {
+    font-size: 9px;
+    color: #c8c0e0;
+    letter-spacing: .04em
+}
+
+.scroll-slot .serr {
+    font-size: 8px;
+    color: #ff5f7e
+}
+
+#msg {
+    position: absolute;
+    color: #ff5f7e;
+    font-size: 11px;
+    letter-spacing: .06em;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity .3s;
+    text-align: center
+}
+
+#craft-screen {
+    position: absolute;
+    inset: 0;
+    background: rgba(8, 8, 16, 0.97);
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    padding: 16px;
+    gap: 10px;
+    overflow-y: auto
+}
+
+#craft-screen.open {
+    display: flex
+}
+
+#craft-title {
+    font-size: 17px;
+    letter-spacing: .18em;
+    color: #e8e0f8;
+    text-shadow: 0 0 20px #9b6fd4;
+    flex-shrink: 0
+}
+
+#craft-subtitle {
+    font-size: 10px;
+    color: #5a5475;
+    letter-spacing: .08em;
+    flex-shrink: 0
+}
+
+#craft-main {
+    display: flex;
+    gap: 10px;
+    width: 100%;
+    max-width: 740px;
+    flex: 1;
+    min-height: 0
+}
+
+#scroll-tabs {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    width: 90px;
+    flex-shrink: 0
+}
+
+.stab {
+    padding: 7px 5px;
+    border: 1px solid #2a2a4a;
+    background: #0f0f1a;
+    cursor: pointer;
+    font-size: 10px;
+    letter-spacing: .05em;
+    color: #5a5475;
+    text-align: center;
+    transition: all .1s
+}
+
+.stab:hover {
+    border-color: #7b5ea7;
+    color: #c8c0e0
+}
+
+.stab.active {
+    border-color: #a87fd4;
+    color: #e8e0f8;
+    background: #1a1030
+}
+
+.stab .terr {
+    display: block;
+    font-size: 8px;
+    color: #ff5f7e;
+    margin-top: 2px
+}
+
+#editor-wrap-craft {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    min-height: 0
+}
+
+#editor-area {
+    display: flex;
+    flex: 1;
+    min-height: 160px;
+    border: 1px solid #2a2a4a;
+    background: #0a0a12;
+    overflow: hidden
+}
+
+#craft-line-nums {
+    width: 30px;
+    padding: 8px 4px 8px 0;
+    text-align: right;
+    color: #3a3458;
+    font-size: 12px;
+    line-height: 1.6;
+    border-right: 1px solid #1e1e35;
+    flex-shrink: 0;
+    overflow: hidden
+}
+
+#craft-line-nums div {
+    line-height: 1.6;
+    height: calc(12px * 1.6)
+}
+
+#craft-editor {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    resize: none;
+    color: #c8c0e0;
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+    line-height: 1.6;
+    padding: 8px;
+    caret-color: #a87fd4;
+    tab-size: 2
+}
+
+#craft-error {
+    font-size: 10px;
+    color: #ff5f7e;
+    min-height: 15px;
+    padding: 1px 3px;
+    flex-shrink: 0
+}
+
+#api-ref {
+    font-size: 9px;
+    color: #3a3458;
+    line-height: 1.8;
+    padding: 3px;
+    columns: 2;
+    column-gap: 12px;
+    flex-shrink: 0
+}
+
+#api-ref span {
+    color: #5a5475
+}
+
+#upgrade-section {
+    width: 100%;
+    max-width: 740px;
+    flex-shrink: 0
+}
+
+#upgrade-title {
+    font-size: 10px;
+    color: #a87fd4;
+    letter-spacing: .1em;
+    margin-bottom: 6px
+}
+
+#upgrade-cards {
+    display: flex;
+    gap: 7px;
+    flex-wrap: wrap
+}
+
+.upg-card {
+    flex: 1;
+    min-width: 110px;
+    padding: 9px 10px;
+    border: 1px solid #2a2a4a;
+    background: #0f0f1a;
+    cursor: pointer;
+    transition: all .14s
+}
+
+.upg-card:hover {
+    border-color: #a87fd4;
+    background: #1a1030;
+    box-shadow: 0 0 10px rgba(168, 127, 212, 0.25)
+}
+
+.upg-card.chosen {
+    border-color: #66d9a0;
+    background: #0a1a14;
+    pointer-events: none
+}
+
+.upg-card .utitle {
+    font-size: 10px;
+    color: #e8e0f8;
+    letter-spacing: .05em;
+    margin-bottom: 3px
+}
+
+.upg-card .udesc {
+    font-size: 9px;
+    color: #5a5475;
+    line-height: 1.5
+}
+
+.upg-card.chosen .utitle {
+    color: #66d9a0
+}
+
+#craft-footer {
+    display: flex;
+    gap: 8px;
+    width: 100%;
+    max-width: 740px;
+    justify-content: flex-end;
+    flex-shrink: 0
+}
+
+.btn-craft {
+    padding: 7px 16px;
+    border: 1px solid #2a2a4a;
+    background: transparent;
+    color: #c8c0e0;
+    font-family: 'Courier New', monospace;
+    font-size: 10px;
+    cursor: pointer;
+    letter-spacing: .07em;
+    transition: all .12s
+}
+
+.btn-craft:hover {
+    border-color: #a87fd4;
+    color: #e8e0f8
+}
+
+.btn-craft.primary {
+    border-color: #a87fd4;
+    color: #a87fd4;
+    background: rgba(168, 127, 212, .1)
+}
+
+.btn-craft.primary:hover {
+    background: rgba(168, 127, 212, .22);
+    box-shadow: 0 0 12px rgba(168, 127, 212, .35)
+}
+
+.btn-craft.primary:disabled {
+    opacity: .35;
+    pointer-events: none
+}
