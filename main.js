@@ -797,10 +797,20 @@ let batchQueue = []
 let enemies = [], projectiles = [], particles = [], spells = []
 let mouse = { x: 0, y: 0 }, keys = {}
 let score = 0, lastTime = 0
-let gameState = 'menu'   // play | crafting | dead | menu | lab
+let gameState = 'menu'   // play | crafting | dead | menu | lab | paused
+
+// ── High Score & Saved Spells ─────────────────────────
+let highScore = parseInt(localStorage.getItem('arcane_highscore') || '0')
+let savedSpells = JSON.parse(localStorage.getItem('arcane_saved_spells') || '[]')
+if (!Array.isArray(savedSpells)) savedSpells = []
 
 // ── Spell Lab ──────────────────────────────────────────
-let labSrc = 'gather(pool, 50)\nshape("ball")\nattribute("fire")\nspeed(5)'
+let labSpellName = 'New Spell'
+let labSpellShape = null
+let labSpellAttribute = null
+let labSpellSpeed = 5
+let labSpellSize = 1
+let labSpellFollow = false
 let labError = null
 let labDummy = null
 let labProjectile = null
@@ -1121,6 +1131,12 @@ function initLab() {
     labProjectile = null
     labEngine = null
     labError = null
+    labSpellName = 'New Spell'
+    labSpellShape = null
+    labSpellAttribute = null
+    labSpellSpeed = 5
+    labSpellSize = 1
+    labSpellFollow = false
 }
 
 function updateLab(dt) {
@@ -1179,10 +1195,23 @@ function castLabSpell(tx, ty) {
         labEngine = null
     }
     
+    // Build spell script from lab settings
+    let script = `gather(pool, 50)\n`
+    if (labSpellShape) {
+        script += `shape("${labSpellShape}"${labSpellSize > 1 ? `, ${labSpellSize}` : ''})\n`
+    }
+    if (labSpellAttribute) {
+        script += `attribute("${labSpellAttribute}")\n`
+    }
+    script += `speed(${labSpellSpeed})`
+    if (labSpellFollow) {
+        script += `\nfollow("target")`
+    }
+    
     // Parse the spell script
     try {
-        const parser = new Parser(labSrc)
-        const ast = parser.parse()
+        const tokens = lex(script)
+        const ast = new Parser(tokens).parse()
         
         if (!ast) {
             labError = 'Failed to parse spell'
@@ -1245,6 +1274,7 @@ function update(ts) {
     if (gameState === 'dead') { drawDead(); requestAnimationFrame(update); return }
     if (gameState === 'crafting') { requestAnimationFrame(update); return }
     if (gameState === 'menu') { drawMenu(); requestAnimationFrame(update); return }
+    if (gameState === 'paused') { drawPaused(); requestAnimationFrame(update); return }
     if (gameState === 'lab') { updateLab(dt); drawLab(); requestAnimationFrame(update); return }
 
     pool.mana = Math.min(pool.maxMana, pool.mana + pool.regenRate * dt)
@@ -1430,10 +1460,63 @@ function drawDead() {
     ctx2d.fillText('Wave Reached: ' + waveNum, W_ / 2, H_ / 2 - 10)
     ctx2d.fillText('Final Score: ' + score, W_ / 2, H_ / 2 + 15)
     
+    // High score check
+    if (score > highScore) {
+        highScore = score
+        localStorage.setItem('arcane_highscore', highScore.toString())
+        ctx2d.font = 'bold 14px monospace'
+        ctx2d.fillStyle = '#ffd93d'
+        ctx2d.fillText('NEW HIGH SCORE!', W_ / 2, H_ / 2 + 40)
+    }
+    
     // Click prompt
     ctx2d.font = 'bold 18px monospace'
     ctx2d.fillStyle = '#9b7aff'
-    ctx2d.fillText('CLICK TO RETURN TO MENU', W_ / 2, H_ / 2 + 60)
+    ctx2d.fillText('CLICK TO RETURN TO MENU', W_ / 2, H_ / 2 + 75)
+    
+    ctx2d.textAlign = 'left'
+}
+
+// ─────────────────────────────────────────────────────
+//  PAUSE SCREEN
+// ─────────────────────────────────────────────────────
+function drawPaused() {
+    const W_ = W(), H_ = H()
+    
+    // Semi-transparent overlay
+    ctx2d.fillStyle = 'rgba(10,10,15,0.85)'
+    ctx2d.fillRect(0, 0, W_, H_)
+    
+    // Title
+    ctx2d.textAlign = 'center'
+    ctx2d.font = 'bold 48px monospace'
+    ctx2d.fillStyle = '#9b7aff'
+    ctx2d.fillText('PAUSED', W_ / 2, H_ / 2 - 80)
+    
+    // Buttons
+    ctx2d.font = 'bold 20px monospace'
+    
+    // Resume button
+    ctx2d.fillStyle = '#2a2a4a'
+    ctx2d.fillRect(W_ / 2 - 80, H_ / 2 - 20, 160, 40)
+    ctx2d.strokeStyle = '#9b7aff'
+    ctx2d.lineWidth = 2
+    ctx2d.strokeRect(W_ / 2 - 80, H_ / 2 - 20, 160, 40)
+    ctx2d.fillStyle = '#c8c0e0'
+    ctx2d.fillText('RESUME', W_ / 2, H_ / 2 + 8)
+    
+    // Quit to menu button
+    ctx2d.fillStyle = '#2a2a4a'
+    ctx2d.fillRect(W_ / 2 - 80, H_ / 2 + 30, 160, 40)
+    ctx2d.strokeStyle = '#ff5f7e'
+    ctx2d.strokeRect(W_ / 2 - 80, H_ / 2 + 30, 160, 40)
+    ctx2d.fillStyle = '#ff5f7e'
+    ctx2d.fillText('QUIT TO MENU', W_ / 2, H_ / 2 + 58)
+    
+    // Hint
+    ctx2d.font = '12px monospace'
+    ctx2d.fillStyle = '#6a6a8a'
+    ctx2d.fillText('Press ESC or P to resume', W_ / 2, H_ / 2 + 100)
     
     ctx2d.textAlign = 'left'
 }
@@ -1537,10 +1620,10 @@ function drawLab() {
     
     // Editor panel
     ctx2d.fillStyle = 'rgba(15, 15, 30, 0.95)'
-    ctx2d.fillRect(10, 10, 280, H_ - 20)
+    ctx2d.fillRect(10, 10, 320, H_ - 20)
     ctx2d.strokeStyle = '#3a3a5a'
     ctx2d.lineWidth = 1
-    ctx2d.strokeRect(10, 10, 280, H_ - 20)
+    ctx2d.strokeRect(10, 10, 320, H_ - 20)
     
     // Title
     ctx2d.font = 'bold 16px monospace'
@@ -1549,40 +1632,145 @@ function drawLab() {
     
     ctx2d.font = '11px monospace'
     ctx2d.fillStyle = '#8a8aac'
-    ctx2d.fillText('Edit spell • Click canvas to cast', 25, 52)
+    ctx2d.fillText('Configure spell • Click canvas to cast', 25, 52)
+    
+    // Spell name input label
+    ctx2d.font = 'bold 12px monospace'
+    ctx2d.fillStyle = '#c8c0e0'
+    ctx2d.fillText('Spell Name:', 25, 80)
+    ctx2d.font = '11px monospace'
+    ctx2d.fillStyle = '#9b7aff'
+    ctx2d.fillText(labSpellName, 120, 80)
     
     // Status display
     ctx2d.font = '10px monospace'
     ctx2d.fillStyle = '#6a6a8a'
-    ctx2d.fillText('━━━━━━━━━━━━━━━━━━━━━━', 25, 70)
+    ctx2d.fillText('━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 25, 100)
+    
+    // Shape buttons
+    ctx2d.font = 'bold 11px monospace'
+    ctx2d.fillStyle = '#c8c0e0'
+    ctx2d.fillText('Shape:', 25, 120)
+    const shapes = ['ball', 'cone', 'beam', 'nova', 'wall']
+    let sx = 25
+    for (const shape of shapes) {
+        const isSelected = labSpellShape === shape
+        const btnW = 50, btnH = 22
+        ctx2d.fillStyle = isSelected ? '#9b7aff' : '#2a2a4a'
+        ctx2d.fillRect(sx, 132, btnW, btnH)
+        ctx2d.strokeStyle = isSelected ? '#c8c0e0' : '#4a4a6a'
+        ctx2d.strokeRect(sx, 132, btnW, btnH)
+        ctx2d.fillStyle = isSelected ? '#fff' : '#8a8aac'
+        ctx2d.font = '10px monospace'
+        ctx2d.textAlign = 'center'
+        ctx2d.fillText(shape, sx + btnW/2, 147)
+        sx += btnW + 5
+    }
+    ctx2d.textAlign = 'left'
+    
+    // Attribute buttons
+    ctx2d.font = 'bold 11px monospace'
+    ctx2d.fillStyle = '#c8c0e0'
+    ctx2d.fillText('Attribute:', 25, 175)
+    const attrs = ['fire', 'ice', 'light', 'shadow', 'arcane', 'void']
+    const attrColors = { fire: '#ff6b6b', ice: '#6bb6ff', light: '#ffd93d', shadow: '#a855f7', arcane: '#c084fc', void: '#64748b' }
+    let ax = 25
+    for (const attr of attrs) {
+        const isSelected = labSpellAttribute === attr
+        const btnW = 48, btnH = 22
+        ctx2d.fillStyle = isSelected ? attrColors[attr] : '#2a2a4a'
+        ctx2d.fillRect(ax, 187, btnW, btnH)
+        ctx2d.strokeStyle = isSelected ? '#fff' : '#4a4a6a'
+        ctx2d.strokeRect(ax, 187, btnW, btnH)
+        ctx2d.fillStyle = isSelected ? '#fff' : '#8a8aac'
+        ctx2d.font = '9px monospace'
+        ctx2d.textAlign = 'center'
+        ctx2d.fillText(attr, ax + btnW/2, 202)
+        ax += btnW + 4
+    }
+    ctx2d.textAlign = 'left'
+    
+    // Speed slider label
+    ctx2d.font = 'bold 11px monospace'
+    ctx2d.fillStyle = '#c8c0e0'
+    ctx2d.fillText('Speed: ' + labSpellSpeed.toFixed(0), 25, 230)
+    ctx2d.fillStyle = '#3a3a5a'
+    ctx2d.fillRect(25, 240, 200, 12)
+    ctx2d.fillStyle = '#9b7aff'
+    ctx2d.fillRect(25, 240, (labSpellSpeed / 10) * 200, 12)
+    ctx2d.strokeStyle = '#4a4a6a'
+    ctx2d.strokeRect(25, 240, 200, 12)
+    
+    // Size control
+    ctx2d.font = 'bold 11px monospace'
+    ctx2d.fillStyle = '#c8c0e0'
+    ctx2d.fillText('Size: ' + labSpellSize, 25, 270)
+    ctx2d.fillStyle = '#3a3a5a'
+    ctx2d.fillRect(25, 280, 100, 12)
+    ctx2d.fillStyle = '#9b7aff'
+    ctx2d.fillRect(25, 280, ((labSpellSize - 1) / 4) * 100, 12)
+    ctx2d.strokeStyle = '#4a4a6a'
+    ctx2d.strokeRect(25, 280, 100, 12)
+    
+    // Follow toggle
+    ctx2d.font = 'bold 11px monospace'
+    ctx2d.fillStyle = '#c8c0e0'
+    ctx2d.fillText('Follow Target:', 25, 315)
+    ctx2d.fillStyle = labSpellFollow ? '#66d9a0' : '#ff5f7e'
+    ctx2d.fillRect(140, 308, 50, 20)
+    ctx2d.fillStyle = '#fff'
+    ctx2d.font = '10px monospace'
+    ctx2d.textAlign = 'center'
+    ctx2d.fillText(labSpellFollow ? 'ON' : 'OFF', 165, 322)
+    ctx2d.textAlign = 'left'
+    
+    // Save/Load buttons area
+    ctx2d.font = 'bold 11px monospace'
+    ctx2d.fillStyle = '#c8c0e0'
+    ctx2d.fillText('Saved Spells:', 25, 355)
+    ctx2d.fillStyle = '#6a6a8a'
+    ctx2d.font = '9px monospace'
+    for (let i = 0; i < Math.min(3, savedSpells.length); i++) {
+        ctx2d.fillText(savedSpells[i].name, 25, 370 + i * 15)
+    }
+    
+    // Active spell status
+    ctx2d.font = '10px monospace'
+    ctx2d.fillStyle = '#6a6a8a'
+    ctx2d.fillText('━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 25, 420)
     
     if (labEngine) {
         ctx2d.fillStyle = '#aaaacc'
-        ctx2d.fillText('Shape: ' + (labEngine.spellShape || 'none'), 25, 88)
-        ctx2d.fillText('Attr: ' + (labEngine.attributes.join(', ') || 'none'), 25, 102)
-        ctx2d.fillText('Speed: ' + labEngine.spellSpeed.toFixed(1), 25, 116)
-        ctx2d.fillText('Size: ' + labEngine.size, 25, 130)
-        ctx2d.fillText('Drain: ' + labEngine.drainRate.toFixed(1) + '/s', 25, 144)
-        ctx2d.fillText('Phase: ' + labEngine.phase, 25, 158)
-        ctx2d.fillText('Mana: ' + Math.floor(labEngine.mana), 25, 172)
+        ctx2d.fillText('Shape: ' + (labEngine.spellShape || 'none'), 25, 438)
+        ctx2d.fillText('Attr: ' + (labEngine.attributes.join(', ') || 'none'), 25, 452)
+        ctx2d.fillText('Speed: ' + labEngine.spellSpeed.toFixed(1), 25, 466)
+        ctx2d.fillText('Size: ' + labEngine.size, 25, 480)
+        ctx2d.fillText('Drain: ' + labEngine.drainRate.toFixed(1) + '/s', 25, 494)
+        ctx2d.fillText('Phase: ' + labEngine.phase, 25, 508)
+        ctx2d.fillText('Mana: ' + Math.floor(labEngine.mana), 25, 522)
     } else {
         ctx2d.fillStyle = '#6a6a8a'
-        ctx2d.fillText('No active spell', 25, 88)
+        ctx2d.fillText('No active spell', 25, 438)
     }
     
     ctx2d.fillStyle = '#6a6a8a'
-    ctx2d.fillText('━━━━━━━━━━━━━━━━━━━━━━', 25, 190)
+    ctx2d.fillText('━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 25, 540)
     ctx2d.fillStyle = '#4a9a6a'
-    ctx2d.fillText('INFINITE MANA', 25, 208)
+    ctx2d.fillText('INFINITE MANA', 25, 558)
+    
+    // Controls hint
+    ctx2d.font = '9px monospace'
+    ctx2d.fillStyle = '#4a4a6a'
+    ctx2d.fillText('Click buttons to configure • M to return', 25, H_ - 40)
     
     // Error message
     if (labError) {
         ctx2d.fillStyle = '#ff5f7e'
         ctx2d.font = '10px monospace'
         const lines = labError.split('\n')
-        let y = 230
+        let y = H_ - 80
         for (const line of lines) {
-            ctx2d.fillText(line.substring(0, 35), 25, y)
+            ctx2d.fillText(line.substring(0, 40), 25, y)
             y += 14
         }
     }
@@ -1626,7 +1814,20 @@ function showMsg(txt) {
 // ─────────────────────────────────────────────────────
 window.addEventListener('keydown', e => {
     keys[e.key.toLowerCase()] = true
+    
+    // Pause toggle (ESC or P)
+    if ((e.key === 'Escape' || e.key.toLowerCase() === 'p') && (gameState === 'play' || gameState === 'paused')) {
+        if (gameState === 'play') {
+            gameState = 'paused'
+        } else {
+            gameState = 'play'
+        }
+        return
+    }
+    
     if (gameState === 'crafting') return
+    if (gameState === 'paused') return
+    
     if (gameState === 'menu' && (e.key === 'Enter' || e.key === ' ')) {
         startGame()
         return
@@ -1641,7 +1842,6 @@ window.addEventListener('keydown', e => {
     }
     if (gameState === 'dead' && (e.key === 'Enter' || e.key === ' ')) {
         gameState = 'menu'
-        startGame()
         return
     }
     if (['1', '2', '3', '4'].includes(e.key)) {
@@ -1660,9 +1860,79 @@ canvas.addEventListener('click', e => { //CAST SPELLS
         startGame()
         return
     }
+    if (gameState === 'paused') {
+        // Check if clicking on pause menu buttons
+        const r = canvas.getBoundingClientRect()
+        const mx = e.clientX - r.left
+        const my = e.clientY - r.top
+        const W_ = W(), H_ = H()
+        
+        // Resume button
+        if (mx > W_/2 - 80 && mx < W_/2 + 80 && my > H_/2 - 20 && my < H_/2 + 20) {
+            gameState = 'play'
+            return
+        }
+        // Quit to menu button
+        if (mx > W_/2 - 80 && mx < W_/2 + 80 && my > H_/2 + 30 && my < H_/2 + 70) {
+            gameState = 'menu'
+            return
+        }
+        return
+    }
     if (gameState === 'lab') {
         const r = canvas.getBoundingClientRect()
-        castLabSpell(e.clientX - r.left, e.clientY - r.top)
+        const mx = e.clientX - r.left
+        const my = e.clientY - r.top
+        
+        // Check button clicks in the lab panel
+        // Shape buttons
+        const shapes = ['ball', 'cone', 'beam', 'nova', 'wall']
+        let sx = 25 + 10  // panel offset
+        for (const shape of shapes) {
+            const btnW = 50, btnH = 22
+            if (mx >= sx && mx <= sx + btnW && my >= 132 && my <= 132 + btnH) {
+                labSpellShape = labSpellShape === shape ? null : shape
+                return
+            }
+            sx += btnW + 5
+        }
+        
+        // Attribute buttons
+        const attrs = ['fire', 'ice', 'light', 'shadow', 'arcane', 'void']
+        let ax = 25 + 10
+        for (const attr of attrs) {
+            const btnW = 48, btnH = 22
+            if (mx >= ax && mx <= ax + btnW && my >= 187 && my <= 187 + btnH) {
+                labSpellAttribute = labSpellAttribute === attr ? null : attr
+                return
+            }
+            ax += btnW + 4
+        }
+        
+        // Speed slider click
+        if (mx >= 35 && mx <= 235 && my >= 240 && my <= 252) {
+            labSpellSpeed = Math.round(((mx - 35) / 200) * 10)
+            labSpellSpeed = Math.max(1, Math.min(10, labSpellSpeed))
+            return
+        }
+        
+        // Size slider click
+        if (mx >= 35 && mx <= 135 && my >= 280 && my <= 292) {
+            labSpellSize = Math.round(((mx - 35) / 100) * 4) + 1
+            labSpellSize = Math.max(1, Math.min(5, labSpellSize))
+            return
+        }
+        
+        // Follow toggle
+        if (mx >= 150 && mx <= 200 && my >= 308 && my <= 328) {
+            labSpellFollow = !labSpellFollow
+            return
+        }
+        
+        // Cast spell on canvas area (outside panel)
+        if (mx > 340) {
+            castLabSpell(mx, my)
+        }
         return
     }
     if (gameState !== 'play') return
@@ -1680,6 +1950,10 @@ canvas.addEventListener('wheel', e => {
 // ─────────────────────────────────────────────────────
 //  BOOT
 // ─────────────────────────────────────────────────────
+function saveSpells() {
+    localStorage.setItem('arcane_saved_spells', JSON.stringify(savedSpells))
+}
+
 function startGame() {
     gameState = 'play'
     player.x = W() / 2; player.y = H() / 2
@@ -1687,15 +1961,16 @@ function startGame() {
     startWave(1)
 }
 
+
 function resetGame() {
     player.hp = player.maxHp = 100; player.invincible = 0
     pool.mana = pool.maxMana = 500; pool.regenRate = 20; pool.costMult = 1; pool.manaOnKill = 0
     scrollSrc = DEFAULT_SRC.map(s => s)
     scrollErrors = [null, null, null, null]
     selectedScroll = 0
-    enemies = [];
-    projectiles = [];
-    particles = [];
+    enemies = []
+    projectiles = []
+    particles = []
 
     score = 0; waveNum = 0; chosenUpgradeIds = []
     startGame()
