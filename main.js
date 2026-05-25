@@ -797,7 +797,14 @@ let batchQueue = []
 let enemies = [], projectiles = [], particles = [], spells = []
 let mouse = { x: 0, y: 0 }, keys = {}
 let score = 0, lastTime = 0
-let gameState = 'menu'   // play | crafting | dead | menu
+let gameState = 'menu'   // play | crafting | dead | menu | lab
+
+// ── Spell Lab ──────────────────────────────────────────
+let labSrc = 'gather(pool, 50)\nshape("ball")\nattribute("fire")\nspeed(5)'
+let labError = null
+let labDummy = null
+let labProjectile = null
+let labEngine = null
 
 // ─────────────────────────────────────────────────────
 //  UPGRADES
@@ -1107,6 +1114,127 @@ function spawnExplosion(x, y, color, radius) {
 }
 
 // ─────────────────────────────────────────────────────
+//  SPELL LAB FUNCTIONS
+// ─────────────────────────────────────────────────────
+function initLab() {
+    labDummy = { x: W() / 2 + 100, y: H() / 2, r: 25, hp: 500, maxHp: 500 }
+    labProjectile = null
+    labEngine = null
+    labError = null
+}
+
+function updateLab(dt) {
+    // Update dummy (stationary)
+    if (labDummy && labDummy.hp <= 0) {
+        // Respawn dummy
+        labDummy.hp = labDummy.maxHp
+    }
+    
+    // Update projectile
+    if (labProjectile && labEngine) {
+        labEngine.tick(dt)
+        
+        if (labEngine.phase === 'active' && labProjectile.alive) {
+            const p = labProjectile
+            p.x += p.vx * dt
+            p.y += p.vy * dt
+            
+            // Check collision with dummy
+            const dx = p.x - labDummy.x
+            const dy = p.y - labDummy.y
+            const dist = Math.sqrt(dx * dx + dy * dy)
+            
+            if (dist < p.r + labDummy.r) {
+                // Hit!
+                const dmg = Math.floor(5 * Math.sqrt(labEngine.reserved) || 10)
+                labDummy.hp = Math.max(0, labDummy.hp - dmg)
+                
+                // Spawn particles
+                spawnParticles(p.x, p.y, ATTR_COLOR[labEngine.attributes[0]] || '#a87fd4', 12, 150, 0.3)
+                
+                // Deactivate projectile
+                p.alive = false
+                labEngine.phase = 'dead'
+            }
+            
+            // Remove if out of bounds
+            if (p.x < 0 || p.x > W() || p.y < 0 || p.y > H()) {
+                p.alive = false
+                labEngine.phase = 'dead'
+            }
+        }
+        
+        if (labEngine.phase === 'dead') {
+            labProjectile = null
+            labEngine = null
+        }
+    }
+}
+
+function castLabSpell(tx, ty) {
+    // Clear previous spell
+    if (labProjectile) {
+        labProjectile.alive = false
+        labProjectile = null
+        labEngine = null
+    }
+    
+    // Parse the spell script
+    try {
+        const parser = new Parser(labSrc)
+        const ast = parser.parse()
+        
+        if (!ast) {
+            labError = 'Failed to parse spell'
+            return
+        }
+        
+        labError = null
+        
+        // Create engine with infinite mana
+        const engine = new SpellEngine({
+            outputFn: (type, msg) => {},
+            poolMana: Infinity,
+            envMana: Infinity
+        })
+        
+        if (!runScroll(ast, engine)) {
+            labError = 'Failed to run spell'
+            return
+        }
+        
+        if (engine.phase === 'idle' || engine.phase === 'dead') {
+            labError = 'Spell did not activate'
+            return
+        }
+        
+        labEngine = engine
+        
+        // Spawn projectile
+        const proj = SpawnProj({ x: W() / 2 - 150, y: H() / 2, vx: 0, vy: 0 }, { x: tx, y: ty }, engine)
+        
+        const snap = engine.snapshot()
+        const dx = tx - proj.x, dy = ty - proj.y
+        const dist = Math.sqrt(dx * dx + dy * dy) || 1
+        const speed = engine.spellSpeed * 100
+        
+        proj.vx = (dx / dist) * speed
+        proj.vy = (dy / dist) * speed
+        
+        const isNova = snap.shape === 'nova'
+        if (isNova) {
+            proj.vx = 0
+            proj.vy = 0
+        }
+        
+        labProjectile = proj
+        
+    } catch (e) {
+        labError = e.message || 'Unknown error'
+    }
+}
+
+// ─────────────────────────────────────────────────────
 //  UPDATE
 // ─────────────────────────────────────────────────────
 function update(ts) {
@@ -1117,6 +1245,7 @@ function update(ts) {
     if (gameState === 'dead') { drawDead(); requestAnimationFrame(update); return }
     if (gameState === 'crafting') { requestAnimationFrame(update); return }
     if (gameState === 'menu') { drawMenu(); requestAnimationFrame(update); return }
+    if (gameState === 'lab') { updateLab(dt); drawLab(); requestAnimationFrame(update); return }
 
     pool.mana = Math.min(pool.maxMana, pool.mana + pool.regenRate * dt)
 
@@ -1284,11 +1413,28 @@ function drawGatheringIndicator(player, progress) {
 
 function drawDead() {
     const W_ = W(), H_ = H()
-    ctx2d.fillStyle = 'rgba(10,10,15,0.88)'; ctx2d.fillRect(0, 0, W_, H_)
+    
+    // Background overlay
+    ctx2d.fillStyle = 'rgba(10,10,15,0.92)'
+    ctx2d.fillRect(0, 0, W_, H_)
+    
+    // Title
     ctx2d.textAlign = 'center'
-    ctx2d.font = 'bold 28px monospace'; ctx2d.fillStyle = '#ff5f7e'; ctx2d.fillText('YOU DIED', W_ / 2, H_ / 2 - 40)
-    ctx2d.font = '13px monospace'; ctx2d.fillStyle = '#c8c0e0'; ctx2d.fillText('Wave ' + waveNum + ' \u00b7 Score ' + score, W_ / 2, H_ / 2 - 10)
-    ctx2d.fillStyle = '#5a5475'; ctx2d.fillText('press R to restart', W_ / 2, H_ / 2 + 20)
+    ctx2d.font = 'bold 48px monospace'
+    ctx2d.fillStyle = '#ff5f7e'
+    ctx2d.fillText('YOU LOST', W_ / 2, H_ / 2 - 60)
+    
+    // Stats
+    ctx2d.font = '16px monospace'
+    ctx2d.fillStyle = '#c8c0e0'
+    ctx2d.fillText('Wave Reached: ' + waveNum, W_ / 2, H_ / 2 - 10)
+    ctx2d.fillText('Final Score: ' + score, W_ / 2, H_ / 2 + 15)
+    
+    // Click prompt
+    ctx2d.font = 'bold 18px monospace'
+    ctx2d.fillStyle = '#9b7aff'
+    ctx2d.fillText('CLICK TO RETURN TO MENU', W_ / 2, H_ / 2 + 60)
+    
     ctx2d.textAlign = 'left'
 }
 
@@ -1309,22 +1455,137 @@ function drawMenu() {
     ctx2d.textAlign = 'center'
     ctx2d.font = 'bold 48px monospace'
     ctx2d.fillStyle = '#9b7aff'
-    ctx2d.fillText('ARCANE SPELLFORGE', W_ / 2, H_ / 2 - 80)
+    ctx2d.fillText('ARCANE SPELLFORGE', W_ / 2, H_ / 2 - 100)
     
     // Subtitle
     ctx2d.font = '16px monospace'
     ctx2d.fillStyle = '#6a5a8a'
-    ctx2d.fillText('Craft spells • Survive waves • Master mana', W_ / 2, H_ / 2 - 50)
+    ctx2d.fillText('Craft spells • Survive waves • Master mana', W_ / 2, H_ / 2 - 70)
     
-    // Start button hint
+    // Menu options
     ctx2d.font = 'bold 20px monospace'
     ctx2d.fillStyle = '#c8c0e0'
-    ctx2d.fillText('CLICK or PRESS ENTER TO START', W_ / 2, H_ / 2 + 20)
+    ctx2d.fillText('CLICK or PRESS ENTER TO START', W_ / 2, H_ / 2 - 20)
+    ctx2d.fillStyle = '#9b7aff'
+    ctx2d.fillText('PRESS "L" FOR SPELL LAB', W_ / 2, H_ / 2 + 15)
     
     // Controls hint
     ctx2d.font = '12px monospace'
     ctx2d.fillStyle = '#4a4465'
-    ctx2d.fillText('WASD/Arrows to move • Edit scrolls between waves', W_ / 2, H_ / 2 + 60)
+    ctx2d.fillText('WASD/Arrows to move • Edit scrolls between waves', W_ / 2, H_ / 2 + 55)
+    
+    ctx2d.textAlign = 'left'
+}
+
+// ─────────────────────────────────────────────────────
+//  SPELL LAB SCREEN
+// ─────────────────────────────────────────────────────
+function drawLab() {
+    const W_ = W(), H_ = H()
+    
+    // Background
+    ctx2d.fillStyle = '#0d0d1a'
+    ctx2d.fillRect(0, 0, W_, H_)
+    
+    // Grid
+    ctx2d.strokeStyle = '#1a1a2e'
+    ctx2d.lineWidth = 1
+    for (let x = 0; x < W_; x += 40) { ctx2d.beginPath(); ctx2d.moveTo(x, 0); ctx2d.lineTo(x, H_); ctx2d.stroke() }
+    for (let y = 0; y < H_; y += 40) { ctx2d.beginPath(); ctx2d.moveTo(0, y); ctx2d.lineTo(W_, y); ctx2d.stroke() }
+    
+    // Draw dummy
+    if (labDummy) {
+        ctx2d.beginPath()
+        ctx2d.arc(labDummy.x, labDummy.y, labDummy.r, 0, Math.PI * 2)
+        ctx2d.fillStyle = '#3a3a5a'
+        ctx2d.fill()
+        ctx2d.strokeStyle = '#6a6a9a'
+        ctx2d.lineWidth = 2
+        ctx2d.stroke()
+        
+        // HP bar
+        const hpPct = labDummy.hp / labDummy.maxHp
+        ctx2d.fillStyle = '#1a1a2e'
+        ctx2d.fillRect(labDummy.x - 20, labDummy.y - labDummy.r - 12, 40, 6)
+        ctx2d.fillStyle = hpPct > 0.5 ? '#66d9a0' : hpPct > 0.25 ? '#ffb347' : '#ff5f7e'
+        ctx2d.fillRect(labDummy.x - 20, labDummy.y - labDummy.r - 12, 40 * hpPct, 6)
+        
+        // HP text
+        ctx2d.font = '8px monospace'
+        ctx2d.fillStyle = '#aaaacc'
+        ctx2d.textAlign = 'center'
+        ctx2d.fillText(Math.floor(labDummy.hp) + '/' + labDummy.maxHp, labDummy.x, labDummy.y - labDummy.r - 15)
+        ctx2d.textAlign = 'left'
+    }
+    
+    // Draw projectile
+    if (labProjectile && labEngine && labEngine.phase === 'active') {
+        const p = labProjectile
+        const color = ATTR_COLOR[p.engine.attributes[0]] || '#a87fd4'
+        const grd = ctx2d.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.r * 2.5)
+        grd.addColorStop(0, color + 'cc')
+        grd.addColorStop(1, color + '00')
+        ctx2d.beginPath()
+        ctx2d.arc(p.x, p.y, p.r * 2.5, 0, Math.PI * 2)
+        ctx2d.fillStyle = grd
+        ctx2d.fill()
+        ctx2d.beginPath()
+        ctx2d.arc(p.x, p.y, p.r, 0, Math.PI * 2)
+        ctx2d.fillStyle = color
+        ctx2d.fill()
+    }
+    
+    // Editor panel
+    ctx2d.fillStyle = 'rgba(15, 15, 30, 0.95)'
+    ctx2d.fillRect(10, 10, 280, H_ - 20)
+    ctx2d.strokeStyle = '#3a3a5a'
+    ctx2d.lineWidth = 1
+    ctx2d.strokeRect(10, 10, 280, H_ - 20)
+    
+    // Title
+    ctx2d.font = 'bold 16px monospace'
+    ctx2d.fillStyle = '#9b7aff'
+    ctx2d.fillText('SPELL LAB', 25, 35)
+    
+    ctx2d.font = '11px monospace'
+    ctx2d.fillStyle = '#8a8aac'
+    ctx2d.fillText('Edit spell • Click canvas to cast', 25, 52)
+    
+    // Status display
+    ctx2d.font = '10px monospace'
+    ctx2d.fillStyle = '#6a6a8a'
+    ctx2d.fillText('━━━━━━━━━━━━━━━━━━━━━━', 25, 70)
+    
+    if (labEngine) {
+        ctx2d.fillStyle = '#aaaacc'
+        ctx2d.fillText('Shape: ' + (labEngine.spellShape || 'none'), 25, 88)
+        ctx2d.fillText('Attr: ' + (labEngine.attributes.join(', ') || 'none'), 25, 102)
+        ctx2d.fillText('Speed: ' + labEngine.spellSpeed.toFixed(1), 25, 116)
+        ctx2d.fillText('Size: ' + labEngine.size, 25, 130)
+        ctx2d.fillText('Drain: ' + labEngine.drainRate.toFixed(1) + '/s', 25, 144)
+        ctx2d.fillText('Phase: ' + labEngine.phase, 25, 158)
+        ctx2d.fillText('Mana: ' + Math.floor(labEngine.mana), 25, 172)
+    } else {
+        ctx2d.fillStyle = '#6a6a8a'
+        ctx2d.fillText('No active spell', 25, 88)
+    }
+    
+    ctx2d.fillStyle = '#6a6a8a'
+    ctx2d.fillText('━━━━━━━━━━━━━━━━━━━━━━', 25, 190)
+    ctx2d.fillStyle = '#4a9a6a'
+    ctx2d.fillText('INFINITE MANA', 25, 208)
+    
+    // Error message
+    if (labError) {
+        ctx2d.fillStyle = '#ff5f7e'
+        ctx2d.font = '10px monospace'
+        const lines = labError.split('\n')
+        let y = 230
+        for (const line of lines) {
+            ctx2d.fillText(line.substring(0, 35), 25, y)
+            y += 14
+        }
+    }
     
     ctx2d.textAlign = 'left'
 }
@@ -1370,11 +1631,23 @@ window.addEventListener('keydown', e => {
         startGame()
         return
     }
+    if (gameState === 'menu' && e.key.toLowerCase() === 'l') {
+        openLab()
+        return
+    }
+    if (gameState === 'lab' && e.key.toLowerCase() === 'm') {
+        gameState = 'menu'
+        return
+    }
+    if (gameState === 'dead' && (e.key === 'Enter' || e.key === ' ')) {
+        gameState = 'menu'
+        startGame()
+        return
+    }
     if (['1', '2', '3', '4'].includes(e.key)) {
         const i = parseInt(e.key) - 1
         if (scrollSrc[i] !== null) { selectedScroll = i; buildScrollBar() }
     }
-    if (e.key.toLowerCase() === 'r' && gameState === 'dead') resetGame()
     if (e.key === ' ') e.preventDefault()
 })
 window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false })
@@ -1382,8 +1655,14 @@ canvas.addEventListener('mousemove', e => {
     const r = canvas.getBoundingClientRect(); mouse.x = e.clientX - r.left; mouse.y = e.clientY - r.top
 })
 canvas.addEventListener('click', e => { //CAST SPELLS
-    if (gameState === 'menu') {
+    if (gameState === 'menu' || gameState === 'dead') {
+        gameState = 'menu'
         startGame()
+        return
+    }
+    if (gameState === 'lab') {
+        const r = canvas.getBoundingClientRect()
+        castLabSpell(e.clientX - r.left, e.clientY - r.top)
         return
     }
     if (gameState !== 'play') return
@@ -1422,6 +1701,10 @@ function resetGame() {
     startGame()
 }
 
+function openLab() {
+    gameState = 'lab'
+    initLab()
+}
 
 
 gameState = 'menu'
