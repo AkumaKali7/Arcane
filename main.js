@@ -17,7 +17,7 @@ const WALL = 24
 let enemies = [], projectiles = [], particles = [], spells = []
 let mouse = { x: 0, y: 0 }, keys = {}
 let score = 0, lastTime = 0
-let gameState = 'menu'   // play | crafting | dead | menu | lab
+let gameState = 'menu'   // play | crafting | dead | menu | lab | paused
 
 // Scroll state
 let scrollSrc = DEFAULT_SRC.map(s => s)
@@ -44,6 +44,10 @@ let craftActiveTab = 0, pendingSrcs = [], craftUpgrades = [], chosenUpgrade = nu
 
 // Upgrades state
 let chosenUpgradeIds = []
+
+// UI button state
+let menuButtons = null
+let pauseButtons = null
 
 function pickUpgrades() {
     const avail = ALL_UPGRADES.filter(u => !(u.once && chosenUpgradeIds.includes(u.id)))
@@ -170,36 +174,8 @@ function drawDead() {
     ctx2d.textAlign = 'left'
 }
 
-function drawMenu() {
-    const W_ = W(), H_ = H()
-    
-    const grad = ctx2d.createLinearGradient(0, 0, 0, H_)
-    grad.addColorStop(0, '#0a0a12')
-    grad.addColorStop(1, '#1a1a2e')
-    ctx2d.fillStyle = grad
-    ctx2d.fillRect(0, 0, W_, H_)
-    
-    ctx2d.textAlign = 'center'
-    ctx2d.font = 'bold 48px monospace'
-    ctx2d.fillStyle = '#9b7aff'
-    ctx2d.fillText('ARCANE SPELLFORGE', W_ / 2, H_ / 2 - 100)
-    
-    ctx2d.font = '16px monospace'
-    ctx2d.fillStyle = '#6a5a8a'
-    ctx2d.fillText('Craft spells • Survive waves • Master mana', W_ / 2, H_ / 2 - 70)
-    
-    ctx2d.font = 'bold 20px monospace'
-    ctx2d.fillStyle = '#c8c0e0'
-    ctx2d.fillText('CLICK or PRESS ENTER TO START', W_ / 2, H_ / 2 - 20)
-    ctx2d.fillStyle = '#9b7aff'
-    ctx2d.fillText('PRESS "L" FOR SPELL LAB', W_ / 2, H_ / 2 + 15)
-    
-    ctx2d.font = '12px monospace'
-    ctx2d.fillStyle = '#4a4465'
-    ctx2d.fillText('WASD/Arrows to move • Edit scrolls between waves', W_ / 2, H_ / 2 + 55)
-    
-    ctx2d.textAlign = 'left'
-}
+// drawMenu function has been moved to ui/ui_manager.js
+// The function is now defined in the UI manager module
 
 function drawLab() {
     const W_ = W(), H_ = H()
@@ -301,13 +277,7 @@ function drawLab() {
     ctx2d.textAlign = 'left'
 }
 
-// Lab functions
-function initLab() {
-    labDummy = { x: W() / 2 + 100, y: H() / 2, r: 25, hp: 500, maxHp: 500 }
-    labProjectile = null
-    labEngine = null
-    labError = null
-}
+// Lab functions - initLab moved to ui_manager.js, keeping updateLab and castLabSpell here
 
 function updateLab(dt) {
     if (labDummy && labDummy.hp <= 0) {
@@ -414,7 +384,12 @@ function update(ts) {
     if (gameState === 'dead') { drawDead(); requestAnimationFrame(update); return }
     if (gameState === 'crafting') { requestAnimationFrame(update); return }
     if (gameState === 'menu') { drawMenu(); requestAnimationFrame(update); return }
-    if (gameState === 'lab') { updateLab(dt); drawLab(); requestAnimationFrame(update); return }
+    if (gameState === 'paused') { draw(); drawPauseOverlay(); requestAnimationFrame(update); return }
+    if (gameState === 'lab') { 
+        // Save spells periodically
+        if (Math.random() < 0.01) saveSpellsToStorage()
+        updateLab(dt); drawLab(); requestAnimationFrame(update); return 
+    }
 
     pool.mana = Math.min(pool.maxMana, pool.mana + pool.regenRate * dt)
 
@@ -490,6 +465,10 @@ function update(ts) {
 
     checkWaveComplete()
     draw()
+    
+    // Auto-save spells occasionally during gameplay
+    if (Math.random() < 0.005) saveSpellsToStorage()
+    
     requestAnimationFrame(update)
 }
 
@@ -598,7 +577,10 @@ function startGame() {
 function resetGame() {
     player.hp = player.maxHp = 100; player.invincible = 0
     pool.mana = pool.maxMana = 500; pool.regenRate = 20; pool.costMult = 1; pool.manaOnKill = 0
-    scrollSrc = DEFAULT_SRC.map(s => s)
+    // Try to load saved spells, otherwise use defaults
+    if (!loadSpellsFromStorage()) {
+        scrollSrc = DEFAULT_SRC.map(s => s)
+    }
     scrollErrors = [null, null, null, null]
     selectedScroll = 0
     enemies = [];
@@ -609,10 +591,7 @@ function resetGame() {
     startGame()
 }
 
-function openLab() {
-    gameState = 'lab'
-    initLab()
-}
+// openLab function has been moved to ui/ui_manager.js
 
 // Initialize global instances
 const pool = new Pool()
@@ -622,6 +601,19 @@ const player = new Player()
 window.addEventListener('keydown', e => {
     keys[e.key.toLowerCase()] = true
     if (gameState === 'crafting') return
+    
+    // Pause toggle with ESC or P
+    if ((e.key === 'Escape' || e.key.toLowerCase() === 'p') && gameState === 'play') {
+        gameState = 'paused'
+        return
+    }
+    
+    // Resume from pause
+    if ((e.key === 'Escape' || e.key.toLowerCase() === 'p') && gameState === 'paused') {
+        gameState = 'play'
+        return
+    }
+    
     if (gameState === 'menu' && (e.key === 'Enter' || e.key === ' ')) {
         startGame()
         return
@@ -632,6 +624,12 @@ window.addEventListener('keydown', e => {
     }
     if (gameState === 'lab' && e.key.toLowerCase() === 'm') {
         gameState = 'menu'
+        return
+    }
+    // TAB to toggle lab editor
+    if (gameState === 'lab' && e.key === 'Tab') {
+        e.preventDefault()
+        toggleLabEditor()
         return
     }
     if (gameState === 'dead' && (e.key === 'Enter' || e.key === ' ')) {
@@ -650,9 +648,25 @@ canvas.addEventListener('mousemove', e => {
     const r = canvas.getBoundingClientRect(); mouse.x = e.clientX - r.left; mouse.y = e.clientY - r.top
 })
 canvas.addEventListener('click', e => {
-    if (gameState === 'menu' || gameState === 'dead') {
+    if (gameState === 'menu') {
+        const r = canvas.getBoundingClientRect()
+        const x = e.clientX - r.left
+        const y = e.clientY - r.top
+        if (!handleMenuClick(x, y)) {
+            startGame()
+        }
+        return
+    }
+    if (gameState === 'dead') {
         gameState = 'menu'
         startGame()
+        return
+    }
+    if (gameState === 'paused') {
+        const r = canvas.getBoundingClientRect()
+        const x = e.clientX - r.left
+        const y = e.clientY - r.top
+        handlePauseClick(x, y)
         return
     }
     if (gameState === 'lab') {
@@ -673,7 +687,10 @@ canvas.addEventListener('wheel', e => {
 }, { passive: false })
 
 // Craft editor events
-document.getElementById('craft-editor').addEventListener('input', () => { updateLineNums(); validateTab(); saveTab() })
+document.getElementById('craft-editor').addEventListener('input', () => { 
+    updateLineNums(); 
+    if (gameState === 'lab') { saveLabSpell(); } else { validateTab(); saveTab(); }
+})
 document.getElementById('craft-editor').addEventListener('keydown', e => {
     if (e.key === 'Tab') {
         e.preventDefault()
@@ -693,6 +710,7 @@ document.getElementById('btn-reset-scroll').addEventListener('click', () => {
     document.getElementById('craft-editor').value = def
     updateLineNums(); validateTab()
 })
+// Save spells when closing craft screen
 document.getElementById('btn-next-wave').addEventListener('click', () => {
     saveTab()
     scrollSrc = pendingSrcs.map((s, i) => scrollSrc[i] === null ? null : s)
@@ -705,6 +723,8 @@ document.getElementById('btn-next-wave').addEventListener('click', () => {
         return scrollSrc[i] === null ? null : ast
     })
     if (chosenUpgrade) { chosenUpgrade.apply(); chosenUpgradeIds.push(chosenUpgrade.id) }
+    // Save spells to localStorage
+    saveSpellsToStorage()
     closeCraftScreen()
     projectiles = []; particles = []
     player.hp = Math.min(player.maxHp, player.hp + 20)
