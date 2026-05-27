@@ -659,7 +659,6 @@ canvas.addEventListener('click', e => {
     }
     if (gameState === 'dead') {
         gameState = 'menu'
-        startGame()
         return
     }
     if (gameState === 'paused') {
