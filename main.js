@@ -634,7 +634,6 @@ window.addEventListener('keydown', e => {
     }
     if (gameState === 'dead' && (e.key === 'Enter' || e.key === ' ')) {
         gameState = 'menu'
-        startGame()
         return
     }
     if (['1', '2', '3', '4'].includes(e.key)) {
