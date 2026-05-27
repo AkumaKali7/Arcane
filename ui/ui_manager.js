@@ -74,7 +74,7 @@ function clearSavedData() {
  * Draw the main menu with clickable buttons
  */
 function drawMenu() {
-    const W_ = W(), H_ = H_()
+    const W_ = W(), H_ = H()
     
     const grad = ctx2d.createLinearGradient(0, 0, 0, H_)
     grad.addColorStop(0, '#0a0a12')
@@ -152,7 +152,7 @@ function drawMenu() {
  * Draw pause screen overlay
  */
 function drawPauseOverlay() {
-    const W_ = W(), H_ = H_()
+    const W_ = W(), H_ = H()
     
     // Semi-transparent overlay
     ctx2d.fillStyle = 'rgba(10, 10, 20, 0.85)'
