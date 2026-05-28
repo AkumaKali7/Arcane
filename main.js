@@ -626,10 +626,14 @@ window.addEventListener('keydown', e => {
         gameState = 'menu'
         return
     }
-    // TAB to toggle lab editor
-    if (gameState === 'lab' && e.key === 'Tab') {
+    // TAB to open spell lab from gameplay or toggle editor when in lab
+    if (e.key === 'Tab') {
         e.preventDefault()
-        toggleLabEditor()
+        if (gameState === 'play') {
+            openLab()
+        } else if (gameState === 'lab') {
+            toggleLabEditor()
+        }
         return
     }
     if (gameState === 'dead' && (e.key === 'Enter' || e.key === ' ')) {

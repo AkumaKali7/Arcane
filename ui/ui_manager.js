@@ -287,11 +287,14 @@ function initLab() {
 }
 
 /**
- * Open spell lab
+ * Open spell lab - identical to crafting window but accessible anytime
  */
 function openLab() {
     gameState = 'lab'
     initLab()
+    // Show the craft screen UI with editor hidden initially
+    document.getElementById('craft-screen').classList.add('open')
+    document.getElementById('editor-wrap-craft').style.display = 'none'
 }
 
 /**
@@ -299,6 +302,8 @@ function openLab() {
  */
 function closeLab() {
     gameState = 'play'
+    document.getElementById('craft-screen').classList.remove('open')
+    document.getElementById('editor-wrap-craft').style.display = 'none'
 }
 
 /**
@@ -309,13 +314,17 @@ function toggleLabEditor() {
     
     const editorWrap = document.getElementById('editor-wrap-craft')
     if (editorWrap.style.display === 'none' || editorWrap.style.display === '') {
-        // Open editor
+        // Open editor - make it identical to crafting window
         editorWrap.style.display = 'block'
         document.getElementById('craft-screen').classList.add('open')
         document.getElementById('upgrade-section').style.display = 'none'
         document.getElementById('craft-footer').innerHTML = `
+            <button class="btn-craft" id="btn-save-lab">✓ SAVE SPELL</button>
             <button class="btn-craft" id="btn-close-lab">✕ CLOSE LAB</button>
         `
+        document.getElementById('btn-save-lab').addEventListener('click', () => {
+            saveLabSpell()
+        })
         document.getElementById('btn-close-lab').addEventListener('click', () => {
             closeLab()
             document.getElementById('craft-screen').classList.remove('open')
